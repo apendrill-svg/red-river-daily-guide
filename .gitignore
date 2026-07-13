@@ -14,3 +14,8 @@ env/
 
 # Generated output
 daily_guide_*.png
+
+web/today.png
+
+# Local Netlify folder
+.netlify
