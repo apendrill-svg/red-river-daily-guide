@@ -146,9 +146,23 @@ def load_scaled(path, target_w=TARGET_W):
     return img.resize((target_w, int(h * scale)), Image.LANCZOS)
 
 
+def measure_width_font(text, font_path, size):
+    fnt = ImageFont.truetype(font_path, size)
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    b = d.textbbox((0, 0), text, font=fnt)
+    return b[2] - b[0]
+
+
+def fit_size_font(text, font_path, start_size, max_width, min_size=12):
+    size = start_size
+    while size > min_size and measure_width_font(text, font_path, size) > max_width:
+        size -= 1
+    return size
+
+
 def build_stats_card(location_name, sub, date, tides_today, tide_window,
                       tide_8am, tide_5pm, hours, buoy, cw=460):
-    ch = 690
+    ch = 800
     shadow = Image.new("RGBA", (cw + 50, ch + 50), (0, 0, 0, 0))
     sd = ImageDraw.Draw(shadow)
     sd.rounded_rectangle([22, 26, 22 + cw, 26 + ch], radius=26, fill=(0, 0, 0, 130))
@@ -156,47 +170,47 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
 
     card = rounded_card((cw, ch), radius=26, fill=(251, 248, 242, 240))
     draw = ImageDraw.Draw(card)
-    pad = 26
+    pad = 30
     y = pad
-    draw.text((pad, y), location_name.upper(), font=ImageFont.truetype(F_MONO_BOLD, 16), fill=TEAL)
-    y += 22
-    draw.text((pad, y), date.strftime("%A, %B %-d"), font=ImageFont.truetype(F_MONO, 14), fill=INK)
-    y += 30
+    draw.text((pad, y), location_name.upper(), font=ImageFont.truetype(F_MONO_BOLD, 19), fill=TEAL)
+    y += 26
+    draw.text((pad, y), date.strftime("%A, %B %-d"), font=ImageFont.truetype(F_MONO, 17), fill=INK)
+    y += 34
 
     y += 6
-    draw.text((pad, y), "TIDE TODAY", font=ImageFont.truetype(F_MONO_BOLD, 15), fill=TEAL)
-    y += 30
-    row_h = 34
-    f_label = ImageFont.truetype(F_SANS_BOLD, 19)
-    f_time = ImageFont.truetype(F_MONO, 18)
+    draw.text((pad, y), "TIDE TODAY", font=ImageFont.truetype(F_MONO_BOLD, 18), fill=TEAL)
+    y += 34
+    row_h = 40
+    f_label = ImageFont.truetype(F_SANS_BOLD, 23)
+    f_time = ImageFont.truetype(F_MONO, 22)
     for e in tides_today:
         is_high = e["type"] == "H"
         arrow = "▲" if is_high else "▼"
         label = "High" if is_high else "Low"
         col = ACCENT if is_high else TEAL
         draw.text((pad, y), arrow, font=f_label, fill=col)
-        draw.text((pad + 30, y), label, font=f_label, fill=INK)
-        draw.text((pad + 110, y + 1), e["time"].strftime("%-I:%M %p"), font=f_time, fill=INK)
+        draw.text((pad + 34, y), label, font=f_label, fill=INK)
+        draw.text((pad + 130, y + 1), e["time"].strftime("%-I:%M %p"), font=f_time, fill=INK)
         hgt_txt = f"{e['height']:.1f} ft"
         hw = draw.textbbox((0, 0), hgt_txt, font=f_time)[2]
         draw.text((cw - pad - hw, y + 1), hgt_txt, font=f_time, fill=INK)
         y += row_h
-    y += 6
+    y += 8
 
     tline = ""
     if tide_8am:
         tline += f"8am {tide_8am['height']:.1f}ft{'↑' if tide_8am['rising'] else '↓'}   "
     if tide_5pm:
         tline += f"5pm {tide_5pm['height']:.1f}ft{'↑' if tide_5pm['rising'] else '↓'}"
-    draw.text((pad, y), tline, font=ImageFont.truetype(F_MONO, 14), fill=(120, 120, 110))
-    y += 32
+    draw.text((pad, y), tline, font=ImageFont.truetype(F_MONO, 17), fill=(120, 120, 110))
+    y += 38
     draw.line([(pad, y), (cw - pad, y)], fill=SAND, width=2)
-    y += 18
+    y += 22
 
     # WIND — plain-language onshore/offshore read for actually sitting on
     # the beach, anchored to midday (or nearest available hour)
-    draw.text((pad, y), "WIND", font=ImageFont.truetype(F_MONO_BOLD, 15), fill=TEAL)
-    y += 26
+    draw.text((pad, y), "WIND", font=ImageFont.truetype(F_MONO_BOLD, 18), fill=TEAL)
+    y += 32
     midday = next((h for h in hours if h[0] == 12), hours[len(hours) // 2])
     mid_period = midday[1]
     mid_wdir = mid_period["windDirection"]
@@ -204,38 +218,40 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     mid_kt = float(mid_period["windSpeed"].split()[0])
     relation = wind_relation(mid_deg)
 
-    diagram_h = 78
+    diagram_h = 96
     draw_shore_wind_diagram(draw, pad, y, cw - 2 * pad, diagram_h, mid_deg, mid_kt, relation)
-    y += diagram_h + 12
+    y += diagram_h + 16
 
     band = wind_speed_band(mid_kt)
     rel_label = relation.replace("-shore", "").upper()
-    draw.text((pad, y), f"{rel_label} · {mid_kt:.0f}kt {band} · from the {mid_wdir}",
-              font=ImageFont.truetype(F_MONO_BOLD, 15), fill=relation_color(relation))
-    y += 24
+    wind_line = f"{rel_label} · {mid_kt:.0f}kt {band} · from the {mid_wdir}"
+    wind_sz = fit_size_font(wind_line, F_MONO_BOLD, 19, cw - 2 * pad, min_size=14)
+    draw.text((pad, y), wind_line, font=ImageFont.truetype(F_MONO_BOLD, wind_sz), fill=relation_color(relation))
+    y += 28
     verdict_text, is_good = kite_verdict(mid_kt, relation)
     verdict_col = ACCENT if is_good else (100, 100, 92)
-    draw.text((pad, y), f"Kite flying: {verdict_text}",
-              font=ImageFont.truetype(F_SANS, 14), fill=verdict_col)
-    y += 30
+    verdict_line = f"Kite flying: {verdict_text}"
+    verdict_sz = fit_size_font(verdict_line, F_SANS, 17, cw - 2 * pad, min_size=12)
+    draw.text((pad, y), verdict_line, font=ImageFont.truetype(F_SANS, verdict_sz), fill=verdict_col)
+    y += 34
     draw.line([(pad, y), (cw - pad, y)], fill=SAND, width=2)
-    y += 16
+    y += 20
 
     subset = hours[::max(len(hours) // 4, 1)][:4]
     col_w = (cw - 2 * pad) / len(subset)
-    icon_y = y + 32
+    icon_y = y + 36
     for i, (th, period, t) in enumerate(subset):
         cx = pad + col_w * i + col_w / 2
-        draw.text((cx - 14, y), t.strftime("%-I%p").lower(), font=ImageFont.truetype(F_MONO, 13), fill=INK)
-        sky_icon(draw, cx, icon_y, 13, sky_glyph(period["shortForecast"]))
-        draw_centered(draw, cx, icon_y + 18, f"{period['temperature']}°", ImageFont.truetype(F_SANS_BOLD, 16), INK)
+        draw.text((cx - 16, y), t.strftime("%-I%p").lower(), font=ImageFont.truetype(F_MONO, 15), fill=INK)
+        sky_icon(draw, cx, icon_y, 16, sky_glyph(period["shortForecast"]))
+        draw_centered(draw, cx, icon_y + 22, f"{period['temperature']}°", ImageFont.truetype(F_SANS_BOLD, 19), INK)
         wdir = period["windDirection"]
         deg = DIR_TO_DEG.get(wdir, 0)
-        draw_wind_arrow(draw, cx, icon_y + 48, deg, 10, relation_color(wind_relation(deg)))
-    y = icon_y + 64
+        draw_wind_arrow(draw, cx, icon_y + 56, deg, 12, relation_color(wind_relation(deg)))
+    y = icon_y + 76
 
     draw.line([(pad, y), (cw - pad, y)], fill=SAND, width=2)
-    y += 14
+    y += 18
     cat, _ = chop_category(buoy["wave_ft"] if buoy else None)
     if buoy:
         chop_line = f"CHOP  {cat} · {buoy['wave_ft']}ft"
@@ -243,7 +259,8 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
             chop_line += f"  ·  wind {buoy['wspd_kt']:.0f}kt"
     else:
         chop_line = "CHOP  unavailable"
-    draw.text((pad, y), chop_line, font=ImageFont.truetype(F_MONO_BOLD, 15), fill=INK)
+    chop_sz = fit_size_font(chop_line, F_MONO_BOLD, 18, cw - 2 * pad, min_size=13)
+    draw.text((pad, y), chop_line, font=ImageFont.truetype(F_MONO_BOLD, chop_sz), fill=INK)
     y += 24
     tsw = datetime.datetime.now().strftime("%-I:%M%p")
     draw.text((pad, y), f"NOAA · NWS · NDBC 44020  ·  upd {tsw}",
@@ -258,7 +275,7 @@ def build_chalk_panel(vibe, date, panel_w):
     lines = vibe.split("\n")
     rendered = []
     for i, l in enumerate(lines):
-        target = 46 if i == 0 else 38
+        target = 56 if i == 0 else 46
         sz = fit_size(l, target, inner_w)
         rendered.append(chalk_text(l, sz, rotation=random.uniform(-1.2, 1.2)))
     date_tag = chalk_text(date.strftime("%a %-m/%-d"), 20, grain=0.28, rotation=-2)
@@ -285,6 +302,31 @@ def build_chalk_panel(vibe, date, panel_w):
     return shadow, panel
 
 
+def extend_canvas_for_phone(img, target_ratio=0.69):
+    """Extends the canvas downward with more sand so the image fills a
+    phone viewport when fit to width, instead of leaving a letterboxed
+    gap. Samples the photo's own bottom strip and tiles it down, with a
+    soft blend at the seam so it doesn't read as an obvious graft."""
+    w, h = img.size
+    target_h = int(w / target_ratio)
+    if target_h <= h:
+        return img
+    extra = target_h - h
+    strip_h = 60
+    strip = img.crop((0, h - strip_h, w, h))
+    new_img = Image.new("RGBA", (w, target_h), (0, 0, 0, 0))
+    new_img.paste(img, (0, 0))
+    y = h
+    while y < target_h:
+        new_img.paste(strip, (0, y))
+        y += strip_h
+    # soften the seam and any tiling repetition
+    band = new_img.crop((0, h - 20, w, min(h + 140, target_h)))
+    band = band.filter(ImageFilter.GaussianBlur(6))
+    new_img.paste(band, (0, h - 20))
+    return new_img
+
+
 def main():
     now = datetime.datetime.now()
     yesterday_str = (now - datetime.timedelta(days=1)).strftime("%Y%m%d")
@@ -303,6 +345,7 @@ def main():
     print(f"category={category} trend={trend} vibe={vibe!r} photo={photo_path}")
 
     img = load_scaled(photo_path).convert("RGBA")
+    img = extend_canvas_for_phone(img, target_ratio=0.69)
     W, H = img.size
     print("canvas", W, H)
 
