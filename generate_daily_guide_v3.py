@@ -23,7 +23,7 @@ from generate_daily_guide_v2 import (
     pick_vibe_line, chalk_text, fit_size, rounded_card, F_SCHOOLBELL,
 )
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+FONT_DIR = os.environ.get("DAILY_GUIDE_FONT_DIR", "/usr/share/fonts/truetype/dejavu/")
 F_SANS_BOLD = FONT_DIR + "DejaVuSans-Bold.ttf"
 F_SANS = FONT_DIR + "DejaVuSans.ttf"
 F_MONO = FONT_DIR + "DejaVuSansMono.ttf"

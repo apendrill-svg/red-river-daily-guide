@@ -9,6 +9,7 @@ Run standalone: python3 generate_daily_guide.py
 Output: daily_guide_<date>.png
 """
 
+import os
 import json
 import math
 import datetime
@@ -30,7 +31,7 @@ TIDE_STATION = "8447506"                # Wychmere Harbor, Harwich Port (subordi
 BUOY_STATION = "44020"                  # Nantucket Sound
 UA = {"User-Agent": "(pendrill-daily-weather-guide, andrew@pendrill.com)"}
 
-FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+FONT_DIR = os.environ.get("DAILY_GUIDE_FONT_DIR", "/usr/share/fonts/truetype/dejavu/")
 F_SERIF      = FONT_DIR + "DejaVuSerif.ttf"
 F_SERIF_BOLD = FONT_DIR + "DejaVuSerif-Bold.ttf"
 F_SANS       = FONT_DIR + "DejaVuSans.ttf"

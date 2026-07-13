@@ -20,7 +20,7 @@ from generate_daily_guide import (
 
 import os
 F_SCHOOLBELL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts", "Schoolbell.ttf")
-FONT_DIR = "/usr/share/fonts/truetype/dejavu/"
+FONT_DIR = os.environ.get("DAILY_GUIDE_FONT_DIR", "/usr/share/fonts/truetype/dejavu/")
 F_SERIF_BOLD = FONT_DIR + "DejaVuSerif-Bold.ttf"
 F_SANS = FONT_DIR + "DejaVuSans.ttf"
 F_SANS_BOLD = FONT_DIR + "DejaVuSans-Bold.ttf"

@@ -11,3 +11,6 @@ env/
 # Editor
 .vscode/
 .idea/
+
+# Generated output
+daily_guide_*.png
