@@ -1,0 +1,62 @@
+name: Daily Red River Guide
+
+# Regenerates today.png from live NOAA/NWS/NDBC data and deploys it to
+# Netlify. Runs on GitHub's infrastructure so egress to the data sources
+# is unblocked (the Anthropic-cloud routine failed here on a proxy 403).
+# Cron is UTC; 11:00 UTC = 7am EDT in summer, 6am EST in winter. When DST
+# flips, either bump the cron or accept the 1-hour shift.
+
+on:
+  schedule:
+    - cron: '0 11 * * *'
+  workflow_dispatch:
+
+jobs:
+  regenerate-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate today's guide (live NOAA/NWS/NDBC)
+        env:
+          DAILY_GUIDE_FONT_DIR: fonts/dejavu/
+        run: python generate_daily_guide_v3.py
+
+      - name: Stage web/today.png with sanity check
+        run: |
+          set -euo pipefail
+          NEWEST=$(ls -t daily_guide_v3_*.png | head -1)
+          [ -n "$NEWEST" ] || { echo "no generated PNG found"; exit 1; }
+          cp "$NEWEST" web/today.png
+          SIZE=$(stat -c%s web/today.png)
+          [ "$SIZE" -gt 500000 ] || { echo "PNG suspiciously small ($SIZE bytes) — aborting"; exit 1; }
+          echo "Copied $NEWEST -> web/today.png ($SIZE bytes)"
+
+      - name: Install Netlify CLI
+        run: npm install -g netlify-cli
+
+      - name: Deploy to Netlify production
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: netlify deploy --dir=web --prod --site=83235988-e150-48aa-bc1a-0351a250ad21
+
+      - name: Verify live deploy
+        run: |
+          set -euo pipefail
+          sleep 15
+          RESP=$(curl -sI https://red-river-guide.netlify.app/today.png)
+          echo "$RESP"
+          SIZE=$(echo "$RESP" | awk 'tolower($1)=="content-length:"{gsub(/\r/,"");print $2}')
+          [ -n "$SIZE" ] && [ "$SIZE" -gt 500000 ] || { echo "live PNG check failed (size=$SIZE)"; exit 1; }
+          echo "OK live=$SIZE bytes"
