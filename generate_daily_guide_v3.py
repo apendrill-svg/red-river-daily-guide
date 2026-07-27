@@ -38,6 +38,16 @@ OFFSHORE_COLOR = (196, 122, 62)
 CROSS_COLOR = (128, 128, 122)
 
 
+_COMPASS_16 = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+               "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+
+
+def deg_to_compass(deg):
+    """Nearest 16-point compass label for a bearing in degrees. The buoy
+    reports wind direction in degrees; the WIND line reads 'from the S'."""
+    return _COMPASS_16[int((deg % 360) / 22.5 + 0.5) % 16]
+
+
 def wind_relation(deg):
     d = deg % 360
     if 112.5 <= d < 247.5:
@@ -53,6 +63,36 @@ def relation_color(relation):
     if relation == "offshore":
         return OFFSHORE_COLOR
     return CROSS_COLOR
+
+
+def resolve_current_wind(buoy, fc_deg, fc_wdir, fc_kt):
+    """Pick the 'right now' wind for the headline anchor line: the live buoy
+    reading (sustained speed, gust, direction) when available, otherwise the
+    NWS forecast. The hourly planning arrows stay forecast-based separately."""
+    if buoy and buoy.get("wspd_kt") is not None and buoy.get("wdir_deg") is not None:
+        return {
+            "kt": buoy["wspd_kt"],
+            "deg": buoy["wdir_deg"],
+            "wdir": deg_to_compass(buoy["wdir_deg"]),
+            "gust": buoy.get("gust_kt"),
+            "source": "buoy",
+        }
+    return {"kt": fc_kt, "deg": fc_deg, "wdir": fc_wdir, "gust": None, "source": "forecast"}
+
+
+def wind_readout(cur):
+    """Structured, legible wind pieces for the headline: a big speed hero,
+    an optional gust callout, and a secondary 'what it means' line. Splitting
+    these lets the render size the speed large instead of cramming six facts
+    onto one auto-shrunk line."""
+    relation = wind_relation(cur["deg"])
+    rel_label = "CROSS-SHORE" if relation.startswith("cross") else relation.upper()
+    return {
+        "speed": f"{cur['kt']:.0f} kt",
+        "gust": None if cur["gust"] is None else f"gusts {cur['gust']:.0f}",
+        "desc": f"{rel_label} · from the {cur['wdir']} · {wind_speed_band(cur['kt'])}",
+        "relation": relation,
+    }
 
 
 def wind_speed_band(kt):
@@ -208,27 +248,43 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     y += 22
 
     # WIND — plain-language onshore/offshore read for actually sitting on
-    # the beach, anchored to midday (or nearest available hour)
+    # the beach. The headline "right now" line prefers the live buoy reading
+    # (sustained speed, gust, and direction) over the NWS forecast, so it
+    # matches what's actually felt on the sand; it falls back to the midday
+    # forecast period only when the buoy wind is unavailable. The hourly
+    # arrows below stay forecast-based for planning ahead.
     draw.text((pad, y), "WIND", font=ImageFont.truetype(F_MONO_BOLD, 18), fill=TEAL)
     y += 32
     midday = next((h for h in hours if h[0] == 12), hours[len(hours) // 2])
     mid_period = midday[1]
-    mid_wdir = mid_period["windDirection"]
-    mid_deg = DIR_TO_DEG.get(mid_wdir, 0)
-    mid_kt = float(mid_period["windSpeed"].split()[0])
-    relation = wind_relation(mid_deg)
+    fc_wdir = mid_period["windDirection"]
+    fc_deg = DIR_TO_DEG.get(fc_wdir, 0)
+    fc_kt = float(mid_period["windSpeed"].split()[0])
 
-    diagram_h = 96
-    draw_shore_wind_diagram(draw, pad, y, cw - 2 * pad, diagram_h, mid_deg, mid_kt, relation)
+    cur = resolve_current_wind(buoy, fc_deg, fc_wdir, fc_kt)
+    relation = wind_relation(cur["deg"])
+    rcol = relation_color(relation)
+    readout = wind_readout(cur)
+
+    diagram_h = 84
+    draw_shore_wind_diagram(draw, pad, y, cw - 2 * pad, diagram_h, cur["deg"], cur["kt"], relation)
     y += diagram_h + 16
 
-    band = wind_speed_band(mid_kt)
-    rel_label = relation.replace("-shore", "").upper()
-    wind_line = f"{rel_label} · {mid_kt:.0f}kt {band} · from the {mid_wdir}"
-    wind_sz = fit_size_font(wind_line, F_MONO_BOLD, 19, cw - 2 * pad, min_size=14)
-    draw.text((pad, y), wind_line, font=ImageFont.truetype(F_MONO_BOLD, wind_sz), fill=relation_color(relation))
-    y += 28
-    verdict_text, is_good = kite_verdict(mid_kt, relation)
+    # Speed is the hero: large and bold so it reads at a glance. The gust,
+    # when present, sits beside it in a smaller weight rather than buried in
+    # a run-on line.
+    f_speed = ImageFont.truetype(F_MONO_BOLD, 32)
+    draw.text((pad, y), readout["speed"], font=f_speed, fill=rcol)
+    if readout["gust"]:
+        speed_w = draw.textbbox((0, 0), readout["speed"], font=f_speed)[2]
+        f_gust = ImageFont.truetype(F_MONO_BOLD, 20)
+        draw.text((pad + speed_w + 16, y + 11), readout["gust"], font=f_gust, fill=INK)
+    y += 42
+    # Secondary line: onshore/offshore, source direction, strength band.
+    desc_sz = fit_size_font(readout["desc"], F_SANS_BOLD, 18, cw - 2 * pad, min_size=14)
+    draw.text((pad, y), readout["desc"], font=ImageFont.truetype(F_SANS_BOLD, desc_sz), fill=rcol)
+    y += 30
+    verdict_text, is_good = kite_verdict(cur["kt"], relation)
     verdict_col = ACCENT if is_good else (100, 100, 92)
     verdict_line = f"Kite flying: {verdict_text}"
     verdict_sz = fit_size_font(verdict_line, F_SANS, 17, cw - 2 * pad, min_size=12)
