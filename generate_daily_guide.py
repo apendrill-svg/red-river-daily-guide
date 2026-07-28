@@ -110,9 +110,14 @@ def fetch_hourly_weather():
 
 
 def pick_hours(periods, target_hours=(6, 9, 12, 15, 18, 20)):
-    """Pick the forecast periods closest to today's target local hours."""
+    """Pick the forecast periods closest to today's target local hours,
+    deduped: if two targets both resolve to the same period (which happens
+    for targets in the past, since 'closest today' collapses them to the
+    first future period), the second target is skipped rather than
+    producing a duplicate column in the render."""
     today = datetime.datetime.now().date()
     picked = []
+    seen = set()
     for th in target_hours:
         best = None
         for p in periods:
@@ -122,8 +127,9 @@ def pick_hours(periods, target_hours=(6, 9, 12, 15, 18, 20)):
             diff = abs(t.hour - th)
             if best is None or diff < best[0]:
                 best = (diff, p, t)
-        if best:
+        if best and best[1]["startTime"] not in seen:
             picked.append((th, best[1], best[2]))
+            seen.add(best[1]["startTime"])
     return picked
 
 

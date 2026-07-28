@@ -118,37 +118,66 @@ def kite_verdict(kt, relation):
     if relation == "offshore":
         return "flyable, but offshore — gustier, and gear can drift out over water", None
     if 8 <= kt <= 20:
-        return "good kite flying wind", True
+        return "ideal", True
     if kt < 8:
         return "light — small or kids' kites only", None
     return "strong — experienced fliers", None
 
 
 def draw_shore_wind_diagram(draw, x0, y0, w, h, deg, kt, relation):
-    """Small shoreline cross-section with a wind arrow, so 'onshore vs
-    offshore' is something you see, not something you have to decode from
-    a compass letter."""
-    shore_y = y0 + h * 0.42
-    draw.rectangle([x0, y0, x0 + w, shore_y], fill=(230, 217, 184))
-    draw.rectangle([x0, shore_y, x0 + w, y0 + h], fill=(68, 118, 122))
-    draw.line([(x0, shore_y), (x0 + w, shore_y)], fill=(110, 88, 60), width=3)
-    f_tiny = ImageFont.truetype(F_MONO, 11)
-    draw.text((x0 + 10, y0 + 6), "SAND", font=f_tiny, fill=(130, 110, 78))
-    draw.text((x0 + 10, y0 + h - 20), "WATER", font=f_tiny, fill=(215, 228, 226))
+    """[Retained for API compatibility, no longer used in the boxless
+    layout.] Small shoreline cross-section with a wind arrow. Replaced
+    by draw_wind_arrow_glyph, which keeps only the arrow (no opaque
+    sand/water strip) to match the transparent-overlay aesthetic."""
+    return
 
-    cx, cy = x0 + w * 0.68, y0 + h * 0.5
+
+def draw_wind_arrow_glyph(draw, cx, cy, radius, deg, color, shadow_color=(0, 0, 0, 200)):
+    """A single wind arrow centered on (cx, cy). Points in the direction
+    the wind is BLOWING TOWARD, which is opposite of `deg` (NWS reports
+    'from' direction). Line + triangle head, colored by shore-relation.
+    A soft outline sits behind it for legibility on any photo tone."""
     travel_deg = (deg + 180) % 360
     rad = math.radians(travel_deg)
     dx, dy = math.sin(rad), -math.cos(rad)
-    L = h * 0.36
-    tip = (cx + dx * L, cy + dy * L)
-    tail = (cx - dx * L, cy - dy * L)
-    col = relation_color(relation)
-    draw.line([tail, tip], fill=col, width=5)
+    tip = (cx + dx * radius, cy + dy * radius)
+    tail = (cx - dx * radius, cy - dy * radius)
+    shaft_w = max(int(radius * 0.14), 3)
     perp = (-dy, dx)
-    left = (tip[0] - dx * 11 + perp[0] * 7, tip[1] - dy * 11 + perp[1] * 7)
-    right = (tip[0] - dx * 11 - perp[0] * 7, tip[1] - dy * 11 - perp[1] * 7)
-    draw.polygon([tip, left, right], fill=col)
+    head_len = radius * 0.42
+    head_w = radius * 0.28
+    left = (tip[0] - dx * head_len + perp[0] * head_w, tip[1] - dy * head_len + perp[1] * head_w)
+    right = (tip[0] - dx * head_len - perp[0] * head_w, tip[1] - dy * head_len - perp[1] * head_w)
+
+    outline_w = shaft_w + 4
+    draw.line([tail, tip], fill=shadow_color, width=outline_w)
+    draw.polygon([tip, left, right], fill=shadow_color, outline=shadow_color)
+    draw.line([tail, tip], fill=color, width=shaft_w)
+    draw.polygon([tip, left, right], fill=color, outline=color)
+
+
+def add_bottom_scrim(img, top_frac=0.68, max_alpha=115):
+    """Composite a soft dark gradient over the bottom portion of img so
+    overlay text remains readable against busy photo content (sand, tire
+    tracks, foliage). Gradient is fully transparent at `top_frac` of the
+    canvas height and eases down to `max_alpha` at the bottom. Non-linear
+    so the transition is imperceptible at the top edge."""
+    if img.mode != "RGBA":
+        img = img.convert("RGBA")
+    w, h = img.size
+    scrim_top = int(h * top_frac)
+    scrim_h = h - scrim_top
+    if scrim_h <= 0:
+        return img
+    gradient = Image.new("L", (1, scrim_h))
+    for py in range(scrim_h):
+        f = py / max(scrim_h - 1, 1)
+        gradient.putpixel((0, py), int(max_alpha * (f ** 1.6)))
+    gradient = gradient.resize((w, scrim_h))
+    scrim = Image.new("RGBA", (w, scrim_h), (0, 0, 0))
+    scrim.putalpha(gradient)
+    img.alpha_composite(scrim, (0, scrim_top))
+    return img
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PHOTO_DIR = os.path.join(SCRIPT_DIR, "photos") + os.sep
@@ -304,11 +333,13 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     rcol = relation_color(relation)
     readout = wind_readout(cur)
 
-    diagram_h = sp(84)
-    diagram_w = int((cw - 2 * pad) * 0.7)
-    diagram_x = (cw - diagram_w) // 2
-    draw_shore_wind_diagram(draw, diagram_x, y, diagram_w, diagram_h, cur["deg"], cur["kt"], relation)
-    y += diagram_h + sp(22)
+    # Big rotated arrow replaces the old opaque sand/water strip. Points
+    # in the direction the wind is BLOWING TOWARD; colored by shore
+    # relation (teal onshore, warm offshore, gray cross-shore).
+    arrow_r = sp(48)
+    arrow_cy = y + arrow_r
+    draw_wind_arrow_glyph(draw, CX, arrow_cy, arrow_r, cur["deg"], rcol)
+    y = arrow_cy + arrow_r + sp(24)
 
     # Speed hero, centered. Gust (when present) sits inline just after it.
     f_speed = ImageFont.truetype(F_MONO_BOLD, sz(32))
@@ -333,7 +364,7 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     draw.line([(pad, y), (cw - pad, y)], fill=RULE, width=2)
     y += sp(30)
 
-    subset = hours[::max(len(hours) // 4, 1)][:4]
+    subset = hours[:4]
     col_w = (cw - 2 * pad) / len(subset)
     icon_y = y + sp(36)
     for i, (th, period, t) in enumerate(subset):
@@ -442,6 +473,7 @@ def main():
 
     img = load_scaled(photo_path).convert("RGBA")
     img = extend_canvas_for_phone(img, target_ratio=0.69)
+    img = add_bottom_scrim(img)
     W, H = img.size
     print("canvas", W, H)
 
