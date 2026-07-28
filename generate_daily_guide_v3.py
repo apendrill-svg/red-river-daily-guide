@@ -156,12 +156,14 @@ def draw_wind_arrow_glyph(draw, cx, cy, radius, deg, color, shadow_color=(0, 0, 
     draw.polygon([tip, left, right], fill=color, outline=color)
 
 
-def add_bottom_scrim(img, top_frac=0.68, max_alpha=115):
-    """Composite a soft dark gradient over the bottom portion of img so
+def add_bottom_scrim(img, top_frac=0.68, max_alpha=115, scrim_rgb=(0, 0, 0)):
+    """Composite a soft gradient scrim over the bottom portion of img so
     overlay text remains readable against busy photo content (sand, tire
     tracks, foliage). Gradient is fully transparent at `top_frac` of the
-    canvas height and eases down to `max_alpha` at the bottom. Non-linear
-    so the transition is imperceptible at the top edge."""
+    canvas height and eases down to `max_alpha` at the bottom, non-linear
+    so the transition is imperceptible at the top edge. `scrim_rgb` sets
+    the color of the wash: black to darken behind light text, white to
+    lighten behind dark text."""
     if img.mode != "RGBA":
         img = img.convert("RGBA")
     w, h = img.size
@@ -174,7 +176,7 @@ def add_bottom_scrim(img, top_frac=0.68, max_alpha=115):
         f = py / max(scrim_h - 1, 1)
         gradient.putpixel((0, py), int(max_alpha * (f ** 1.6)))
     gradient = gradient.resize((w, scrim_h))
-    scrim = Image.new("RGBA", (w, scrim_h), (0, 0, 0))
+    scrim = Image.new("RGBA", (w, scrim_h), scrim_rgb)
     scrim.putalpha(gradient)
     img.alpha_composite(scrim, (0, scrim_top))
     return img
@@ -192,12 +194,12 @@ PHOTO_LIBRARY = {
 # photo rather than assumed. panel_w_frac / card_w_frac are fractions of
 # canvas width; sides are measured clear of the stand's actual footprint.
 PLACEMENTS = {
-    "bright.jpeg":     {"panel_w_frac": 0.24, "card_w_frac": 1.0},
-    "overcast.jpeg":   {"panel_w_frac": 0.28, "card_w_frac": 1.0},
-    "dusk_sign.jpeg":  {"panel_w_frac": 0.30, "card_w_frac": 1.0},
-    "dusk_small.jpeg": {"panel_w_frac": 0.38, "card_w_frac": 1.0},
+    "bright.jpeg":     {"panel_w_frac": 0.24, "card_w_frac": 1.0, "text_theme": "dark"},
+    "overcast.jpeg":   {"panel_w_frac": 0.28, "card_w_frac": 1.0, "text_theme": "dark"},
+    "dusk_sign.jpeg":  {"panel_w_frac": 0.30, "card_w_frac": 1.0, "text_theme": "light"},
+    "dusk_small.jpeg": {"panel_w_frac": 0.38, "card_w_frac": 1.0, "text_theme": "light"},
 }
-DEFAULT_PLACEMENT = {"panel_w_frac": 0.26, "card_w_frac": 1.0}
+DEFAULT_PLACEMENT = {"panel_w_frac": 0.26, "card_w_frac": 1.0, "text_theme": "light"}
 
 TARGET_W = 1400  # upscale target; source photos are modest resolution
 
@@ -229,12 +231,13 @@ def fit_size_font(text, font_path, start_size, max_width, min_size=12):
     return size
 
 
-def _soft_text(draw, xy, text, font, fill, stroke=2):
-    """Text with a subtle dark stroke so it stays legible over any photo,
-    without a card behind it. `fill` may be a 3- or 4-tuple; the stroke
-    uses ~80% black."""
+def _soft_text(draw, xy, text, font, fill, stroke=2, stroke_fill=(0, 0, 0, 200)):
+    """Text with a soft stroke behind it so it stays legible over any
+    photo, without a card. Default stroke is 80% black (works for white
+    text over darker/mixed scenes); pass a lighter stroke_fill when the
+    text itself is dark and needs a light halo instead."""
     draw.text(xy, text, font=font, fill=fill,
-              stroke_width=stroke, stroke_fill=(0, 0, 0, 200))
+              stroke_width=stroke, stroke_fill=stroke_fill)
 
 
 def _soft_center(draw, cx, y, text, font, fill, stroke=2):
@@ -254,10 +257,13 @@ def _row_centered(draw, cx, y, tokens, gap=0):
 
 
 def build_stats_card(location_name, sub, date, tides_today, tide_window,
-                      tide_8am, tide_5pm, hours, buoy, cw=460, ch=None, scale=2.0):
+                      tide_8am, tide_5pm, hours, buoy, cw=460, ch=None, scale=2.0,
+                      text_theme="light"):
     # Full-canvas boxless layout: card fills the entire page, everything
-    # centered horizontally, text drawn directly on the photo with a soft
-    # dark stroke for legibility.
+    # centered horizontally, text drawn directly on the photo. Palette
+    # flips per photo via text_theme: "light" (white text + black stroke)
+    # for dusk/dark scenes, "dark" (dark text + white stroke) for bright
+    # or overcast scenes where dark ink reads better against light sky.
     S = scale
     def sz(n): return max(int(round(n * S)), 6)
     def sp(n): return int(round(n * S))
@@ -270,20 +276,45 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     CX = cw // 2
     pad = sp(80)  # generous horizontal margins for lines/diagram, text is centered on CX
     y = sp(60)     # top breathing room
-    HEAD = (144, 220, 230, 255)
-    BODY = (255, 255, 255, 255)
-    MUTED = (230, 226, 214, 220)
-    HIGH = (255, 200, 90, 255)
-    RULE = (255, 255, 255, 90)
 
-    _soft_center(draw, CX, y, location_name.upper(), ImageFont.truetype(F_MONO_BOLD, sz(22)), HEAD)
+    if text_theme == "dark":
+        STROKE = (255, 255, 255, 210)  # white halo on dark text
+        HEAD = (14, 74, 92, 255)       # deep teal
+        BODY = (22, 26, 30, 255)        # near-black, not pure
+        MUTED = (72, 66, 56, 220)       # warm charcoal
+        HIGH = (168, 84, 20, 255)       # burnt amber
+        RULE = (0, 0, 0, 100)           # translucent black
+    else:
+        STROKE = (0, 0, 0, 200)         # black halo on white text
+        HEAD = (144, 220, 230, 255)
+        BODY = (255, 255, 255, 255)
+        MUTED = (230, 226, 214, 220)
+        HIGH = (255, 200, 90, 255)
+        RULE = (255, 255, 255, 90)
+
+    # Local, theme-bound text helpers so every call in this function picks
+    # up the theme's stroke color without threading it as an extra arg.
+    def st(xy, text, font, fill, stroke=2):
+        _soft_text(draw, xy, text, font, fill, stroke=stroke, stroke_fill=STROKE)
+    def sc(cx_, y_, text, font, fill, stroke=2):
+        w = draw.textbbox((0, 0), text, font=font)[2]
+        st((cx_ - w // 2, y_), text, font, fill, stroke)
+    def rc(cx_, y_, tokens, gap=0):
+        widths = [draw.textbbox((0, 0), t, font=f)[2] for t, f, _ in tokens]
+        total = sum(widths) + gap * (len(tokens) - 1)
+        x = cx_ - total // 2
+        for (text, font, color), w in zip(tokens, widths):
+            st((x, y_), text, font, color)
+            x += w + gap
+
+    sc(CX, y, location_name.upper(), ImageFont.truetype(F_MONO_BOLD, sz(22)), HEAD)
     y += sp(32)
-    _soft_center(draw, CX, y, sub, ImageFont.truetype(F_MONO, sz(15)), MUTED)
+    sc(CX, y, sub, ImageFont.truetype(F_MONO, sz(15)), MUTED)
     y += sp(26)
-    _soft_center(draw, CX, y, date.strftime("%A, %B %-d"), ImageFont.truetype(F_MONO, sz(17)), BODY)
+    sc(CX, y, date.strftime("%A, %B %-d"), ImageFont.truetype(F_MONO, sz(17)), BODY)
     y += sp(52)
 
-    _soft_center(draw, CX, y, "TIDE TODAY", ImageFont.truetype(F_MONO_BOLD, sz(18)), HEAD)
+    sc(CX, y, "TIDE TODAY", ImageFont.truetype(F_MONO_BOLD, sz(18)), HEAD)
     y += sp(40)
     row_h = sp(46)
     f_label = ImageFont.truetype(F_SANS_BOLD, sz(23))
@@ -300,7 +331,7 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
             (f"    {e['time'].strftime('%-I:%M %p')}", f_time, BODY),
             (f"    {hgt_txt}", f_time, BODY),
         ]
-        _row_centered(draw, CX, y, tokens)
+        rc(CX, y, tokens)
         y += row_h
     y += sp(12)
 
@@ -309,7 +340,7 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
         tline += f"8am {tide_8am['height']:.1f}ft{'↑' if tide_8am['rising'] else '↓'}   "
     if tide_5pm:
         tline += f"5pm {tide_5pm['height']:.1f}ft{'↑' if tide_5pm['rising'] else '↓'}"
-    _soft_center(draw, CX, y, tline, ImageFont.truetype(F_MONO, sz(17)), MUTED)
+    sc(CX, y, tline, ImageFont.truetype(F_MONO, sz(17)), MUTED)
     y += sp(44)
     draw.line([(pad, y), (cw - pad, y)], fill=RULE, width=2)
     y += sp(30)
@@ -320,7 +351,7 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     # matches what's actually felt on the sand; it falls back to the midday
     # forecast period only when the buoy wind is unavailable. The hourly
     # arrows below stay forecast-based for planning ahead.
-    _soft_center(draw, CX, y, "WIND", ImageFont.truetype(F_MONO_BOLD, sz(18)), HEAD)
+    sc(CX, y, "WIND", ImageFont.truetype(F_MONO_BOLD, sz(18)), HEAD)
     y += sp(40)
     midday = next((h for h in hours if h[0] == 12), hours[len(hours) // 2])
     mid_period = midday[1]
@@ -338,28 +369,28 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     # relation (teal onshore, warm offshore, gray cross-shore).
     arrow_r = sp(48)
     arrow_cy = y + arrow_r
-    draw_wind_arrow_glyph(draw, CX, arrow_cy, arrow_r, cur["deg"], rcol)
+    draw_wind_arrow_glyph(draw, CX, arrow_cy, arrow_r, cur["deg"], rcol, shadow_color=STROKE)
     y = arrow_cy + arrow_r + sp(24)
 
     # Speed hero, centered. Gust (when present) sits inline just after it.
     f_speed = ImageFont.truetype(F_MONO_BOLD, sz(32))
     if readout["gust"]:
         f_gust = ImageFont.truetype(F_MONO_BOLD, sz(20))
-        _row_centered(draw, CX, y, [
+        rc(CX, y, [
             (readout["speed"], f_speed, BODY),
             (f"   {readout['gust']}", f_gust, HIGH),
         ])
     else:
-        _soft_center(draw, CX, y, readout["speed"], f_speed, BODY)
+        sc(CX, y, readout["speed"], f_speed, BODY)
     y += sp(50)
     desc_sz = fit_size_font(readout["desc"], F_SANS_BOLD, sz(18), cw - 2 * pad, min_size=sz(14))
-    _soft_center(draw, CX, y, readout["desc"], ImageFont.truetype(F_SANS_BOLD, desc_sz), BODY)
+    sc(CX, y, readout["desc"], ImageFont.truetype(F_SANS_BOLD, desc_sz), BODY)
     y += sp(38)
     verdict_text, is_good = kite_verdict(cur["kt"], relation)
     verdict_col = HIGH if is_good else MUTED
     verdict_line = f"Kite flying: {verdict_text}"
     verdict_sz = fit_size_font(verdict_line, F_SANS, sz(17), cw - 2 * pad, min_size=sz(12))
-    _soft_center(draw, CX, y, verdict_line, ImageFont.truetype(F_SANS, verdict_sz), verdict_col)
+    sc(CX, y, verdict_line, ImageFont.truetype(F_SANS, verdict_sz), verdict_col)
     y += sp(44)
     draw.line([(pad, y), (cw - pad, y)], fill=RULE, width=2)
     y += sp(30)
@@ -369,9 +400,9 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     icon_y = y + sp(36)
     for i, (th, period, t) in enumerate(subset):
         cx = pad + col_w * i + col_w / 2
-        _soft_center(draw, cx, y, t.strftime("%-I%p").lower(), ImageFont.truetype(F_MONO, sz(15)), BODY)
+        sc(cx, y, t.strftime("%-I%p").lower(), ImageFont.truetype(F_MONO, sz(15)), BODY)
         sky_icon(draw, cx, icon_y, sp(16), sky_glyph(period["shortForecast"]))
-        draw_centered(draw, cx, icon_y + sp(22), f"{period['temperature']}°", ImageFont.truetype(F_SANS_BOLD, sz(19)), BODY)
+        sc(cx, icon_y + sp(22) - sz(19) // 2, f"{period['temperature']}°", ImageFont.truetype(F_SANS_BOLD, sz(19)), BODY)
         wdir = period["windDirection"]
         deg = DIR_TO_DEG.get(wdir, 0)
         draw_wind_arrow(draw, cx, icon_y + sp(56), deg, sp(12), relation_color(wind_relation(deg)))
@@ -387,10 +418,10 @@ def build_stats_card(location_name, sub, date, tides_today, tide_window,
     else:
         chop_line = "CHOP  unavailable"
     chop_sz = fit_size_font(chop_line, F_MONO_BOLD, sz(18), cw - 2 * pad, min_size=sz(13))
-    _soft_center(draw, CX, y, chop_line, ImageFont.truetype(F_MONO_BOLD, chop_sz), BODY)
+    sc(CX, y, chop_line, ImageFont.truetype(F_MONO_BOLD, chop_sz), BODY)
     y += sp(36)
     tsw = datetime.datetime.now().strftime("%-I:%M%p")
-    _soft_center(draw, CX, y, f"NOAA · NWS · NDBC 44020  ·  upd {tsw}",
+    sc(CX, y, f"NOAA · NWS · NDBC 44020  ·  upd {tsw}",
                  ImageFont.truetype(F_MONO, sz(11)), MUTED, stroke=1)
     return shadow, card
 
@@ -473,19 +504,18 @@ def main():
 
     img = load_scaled(photo_path).convert("RGBA")
     img = extend_canvas_for_phone(img, target_ratio=0.69)
-    img = add_bottom_scrim(img)
-    W, H = img.size
-    print("canvas", W, H)
-
-    # Full-canvas boxless overlay: info fills the entire page, centered.
-    # The old top-left location tag and the bottom-left chalk vibe panel are
-    # intentionally skipped in this layout — the centered card carries the
-    # location line itself, and the chalk panel would collide with centered
-    # content.
     placement = PLACEMENTS.get(os.path.basename(photo_path), DEFAULT_PLACEMENT)
+    text_theme = placement.get("text_theme", "light")
+    # Scrim direction follows the text: dark scrim for light text (dusk
+    # photos), soft light scrim for dark text (bright/overcast photos).
+    scrim_color = (0, 0, 0) if text_theme == "light" else (255, 255, 255)
+    img = add_bottom_scrim(img, scrim_rgb=scrim_color)
+    W, H = img.size
+    print("canvas", W, H, "theme", text_theme)
+
     shadow, card = build_stats_card("Red River Beach", "Harwichport, MA", now,
                                       tides_today, tide_window, tide_8am, tide_5pm, hours, buoy,
-                                      cw=W, ch=H)
+                                      cw=W, ch=H, text_theme=text_theme)
     img.alpha_composite(card, (0, 0))
 
     out = img.convert("RGB")
