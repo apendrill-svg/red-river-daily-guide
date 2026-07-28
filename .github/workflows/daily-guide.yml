@@ -17,10 +17,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -28,10 +28,29 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      # NWS's hourly forecast endpoint 500s intermittently (observed
+      # multiple times on 2026-07-28). Retry up to 3 times with 45s backoff
+      # so a bad NWS moment doesn't fail the whole daily deploy. Only the
+      # generator step retries; downstream steps stay fail-fast.
       - name: Generate today's guide (live NOAA/NWS/NDBC)
         env:
           DAILY_GUIDE_FONT_DIR: fonts/dejavu/
-        run: python generate_daily_guide_v3.py
+        run: |
+          set +e
+          for attempt in 1 2 3; do
+            echo "=== Attempt $attempt ==="
+            python generate_daily_guide_v3.py
+            RC=$?
+            if [ $RC -eq 0 ]; then
+              exit 0
+            fi
+            if [ $attempt -lt 3 ]; then
+              echo "Attempt $attempt failed (rc=$RC); sleeping 45s before retry..."
+              sleep 45
+            fi
+          done
+          echo "All 3 attempts failed"
+          exit 1
 
       - name: Stage web/today.png with sanity check
         run: |
